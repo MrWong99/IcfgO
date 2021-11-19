@@ -1,53 +1,35 @@
 package main
 
 import (
-	"flag"
 	"log"
 	"sync"
 
+	"github.com/MrWong99/IcfgO/config"
 	"github.com/MrWong99/IcfgO/console"
+	"github.com/MrWong99/IcfgO/scramble"
 	"github.com/MrWong99/filemanager/fman"
 )
-
-type Reader interface {
-	Read() ([]string, error)
-}
-
-type Writer interface {
-	Write([]string) error
-}
-
-// Just an example to show interface composition.
-type ReaderWriter interface {
-	Reader
-	Writer
-}
 
 // This WaitGroup is used to wait for all routines to finish before exiting.
 // See https://gobyexample.com/waitgroups
 var wg sync.WaitGroup
 
 func main() {
-	inputFile := flag.String("input-file", "", "A file that should be read to be scrambled with console.")
-	outputFile := flag.String("output-file", "./test.out", "A file that should contain the scrambled result.")
-	flag.Parse()
 
-	if len(*inputFile) == 0 {
-		log.Fatalln("Please provide a valid --input-file.")
-	}
+	appConfig := config.ParseAppConfig()
 
 	// Initialize used in- and outputs
-	var consoleIO ReaderWriter = &console.Console{}
+	var consoleIO config.ReaderWriter = &console.Console{}
 	inFile := fman.File{
-		Path: *inputFile,
+		Path: appConfig.InputFile,
 	}
 	outFile := fman.File{
-		Path: *outputFile,
+		Path: appConfig.OutputFile,
 	}
 
 	// Initialize input slices and use direct type declarations
-	var readers []Reader = []Reader{consoleIO, &inFile}
-	var writers []Writer = []Writer{consoleIO, &outFile}
+	var readers []config.Reader = []config.Reader{consoleIO, &inFile}
+	var writers []config.Writer = []config.Writer{consoleIO, &outFile}
 
 	// Initialize a slice of channels that can be used to send slices of strings
 	var scrambleChannels []chan []string
@@ -64,7 +46,7 @@ func main() {
 		// which would result in unexpected/unwanted behaviour.
 		// The type syntax "<-chan []string" indicates that the given channel can only be used to read
 		// messages but not send
-		go func(writy Writer, inputChan <-chan []string) {
+		go func(writy config.Writer, inputChan <-chan []string) {
 			defer wg.Done() // Upon exiting the routine tell the wait group that one routine is finished
 
 			// Wait for a message to be received on the given channel. This will block this go routine until this happens
@@ -92,7 +74,7 @@ func main() {
 		scramblePreparation = append(scramblePreparation, input)
 	}
 
-	scrambledOutput := scramble(scramblePreparation)
+	scrambledOutput := scramble.Scramble(scramblePreparation)
 
 	// Send the scrambled output via the previously created channels to all writers.
 	// Start a go routine so it is non-blocking
@@ -106,71 +88,4 @@ func main() {
 	}
 
 	wg.Wait() // Wait for all routines to finish
-}
-
-/* Scrambles the given inputs together. It will append to the result alternating evenly from the given inputs, e.g.:
-toScramble := [][]string{
-	[]string{"Hello"},
-	[]string{"World", "is big"},
-    []string{"!", "even a", "english sentence?"}
-}
-will produce
-[]string{
-	"Hello",
-	"World",
-	"!",
-	"is big",
-	"even a",
-	"english sentence?",
-}
-*/
-func scramble(toScramble [][]string) []string {
-	var result []string
-	lastIndex := 0
-	for {
-		// Retrieve the smallest length of all of the given slices. In the example above this would return 1,
-		// but if the first slice []string{"Hello"} wouldn't exist it would return 2
-		upToIndex := smallestLength(toScramble)
-
-		// Iterate over the arrays by the index and append each string to the result slice, starting by the index from the last loop iteration or 0 if there was none yet,
-		// up to the shortest length of all of the input arrays
-		for i := lastIndex; i < upToIndex; i++ {
-			for _, theArray := range toScramble {
-				result = append(result, theArray[i])
-			}
-		}
-		lastIndex = upToIndex
-
-		// This removes all of the slices from toScramble that are as long as the last calculated smallest length.
-		// These slices are too short to provide any new values for the output.
-		var biggerSlices [][]string = [][]string{}
-		for _, arr := range toScramble {
-			if len(arr) > upToIndex {
-				biggerSlices = append(biggerSlices, arr)
-			}
-		}
-		toScramble = biggerSlices
-
-		// Jump out of the infinite loop if there are no more slices left to process
-		lengthAfterFilter := len(biggerSlices)
-		if lengthAfterFilter <= 0 {
-			break
-		}
-	}
-	return result
-}
-
-// Retrieve the smallest length of all of the given slices or 0 if an empty slice is passed in
-func smallestLength(toCompare [][]string) int {
-	if len(toCompare) <= 0 {
-		return 0
-	}
-	smallestLength := len(toCompare[0])
-	for _, comp := range toCompare {
-		length := len(comp)
-		if length < smallestLength {
-			smallestLength = length
-		}
-	}
-	return smallestLength
 }
